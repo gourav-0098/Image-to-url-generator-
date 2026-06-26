@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-inter);
+}
+
+/* ─── Base ─── */
+body {
+  background: #09090b;
+  color: #fafafa;
+}
+
+/* ─── Dropzone dashed border animation ─── */
+@keyframes dash-march {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.dropzone-border {
+  animation: dash-march 0.6s linear infinite paused;
+}
+
+.dropzone-active .dropzone-border {
+  animation-play-state: running;
+}
+
+/* ─── Progress bar shimmer ─── */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.progress-bar-shimmer {
+  background: linear-gradient(
+    90deg,
+    #6366f1 0%,
+    #818cf8 40%,
+    #a5b4fc 50%,
+    #818cf8 60%,
+    #6366f1 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ─── Subtle glow behind the card ─── */
+.card-glow {
+  box-shadow: 0 0 80px 20px rgba(99, 102, 241, 0.08),
+    0 0 40px 10px rgba(139, 92, 246, 0.05);
+}
+
+/* ─── Copy button pulse ─── */
+@keyframes copy-pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.copy-success {
+  animation: copy-pulse 0.3s ease;
+}

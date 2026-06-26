@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment files (secrets — NEVER commit these)
+.env
+.env.local
+.env.production
+backend/.env
+frontend/.env.local
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vercel
+.vercel/
+
+# Uploads folder (local dev only)
+backend/uploads/
+
+# Lock files from wrong directories
+package-lock.json
+
+# Test files
+backend/test_image.png
