@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 
-const API_URL = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/api/v1/upload`;
+const API_URL = `${process.env.NEXT_PUBLIC_API_URL || "https://image-to-url-generator.vercel.app"}/api/v1/upload`;
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_SIZE = 4.5 * 1024 * 1024; // 4.5 MB (matches Vercel limit)
