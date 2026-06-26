@@ -16,24 +16,11 @@ app.use(helmet({
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
-// ─── 2. CORS ───
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-
-// Fallback to localhost in dev if ALLOWED_ORIGINS is empty
-if (allowedOrigins.length === 0) {
-  allowedOrigins.push('http://localhost:3001', 'http://localhost:3000');
-}
-
+// ─── 2. CORS — Allow any origin to connect ───
 app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error('Blocked by CORS'));
-  },
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 600,
 }));
 
