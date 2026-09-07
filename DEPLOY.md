@@ -35,14 +35,13 @@ git push -u origin main
 2. Click **Import Git Repository** → select your `Image_to_url` repo
 3. Set **Root Directory** to: `backend`
 4. Framework Preset: **Other**
-5. Click **Environment Variables** and add these 4 keys:
+5. Click **Environment Variables** and add these 3 Cloudinary keys:
 
    | Key | Value |
    |-----|-------|
-   | `GOOGLE_CLIENT_ID` | `912596897026-xxxxx.apps.googleusercontent.com` |
-   | `GOOGLE_CLIENT_SECRET` | `GOCSPX-xxxxx` |
-   | `GOOGLE_REFRESH_TOKEN` | `1//04xxxxx` |
-   | `GOOGLE_DRIVE_FOLDER_ID` | `1Uy5Pdn1t8Ra...` |
+   | `CLOUDINARY_CLOUD_NAME` | `zuh4mnf3` |
+   | `CLOUDINARY_API_KEY` | `599846758825617` |
+   | `CLOUDINARY_API_SECRET` | `WGSFgXyY7_gA6LTHnNM6y0gbPCQ` |
 
 6. Click **Deploy**
 7. Once deployed, copy the URL (e.g., `https://image-to-url-backend.vercel.app`)

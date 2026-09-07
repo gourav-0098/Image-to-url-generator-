@@ -136,7 +136,7 @@ export default function Home() {
             ImgDrive
           </h1>
           <p className="mt-2 text-sm text-zinc-400">
-            Upload an image · Get a shareable Google Drive link instantly
+            Upload an image · Get a permanent, shareable CDN link instantly
           </p>
         </div>
 
@@ -249,7 +249,7 @@ export default function Home() {
               </div>
 
               <p className="text-sm font-medium text-zinc-300">
-                Uploading to Google Drive…
+                Uploading image…
               </p>
 
               {/* Progress bar */}
