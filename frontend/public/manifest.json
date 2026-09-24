@@ -1,0 +1,12 @@
+{
+  "name": "ImgDrive — Instant Image Hosting",
+  "short_name": "ImgDrive",
+  "description": "Upload up to 10 images and share via a single gallery link",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#6366f1",
+  "icons": [
+    { "src": "/vercel.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

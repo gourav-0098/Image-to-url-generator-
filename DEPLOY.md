@@ -35,13 +35,14 @@ git push -u origin main
 2. Click **Import Git Repository** → select your `Image_to_url` repo
 3. Set **Root Directory** to: `backend`
 4. Framework Preset: **Other**
-5. Click **Environment Variables** and add these 3 Cloudinary keys:
+5. Click **Environment Variables** and add these 3 Cloudinary keys (from https://console.cloudinary.com):
 
    | Key | Value |
    |-----|-------|
-   | `CLOUDINARY_CLOUD_NAME` | `zuh4mnf3` |
-   | `CLOUDINARY_API_KEY` | `599846758825617` |
-   | `CLOUDINARY_API_SECRET` | `WGSFgXyY7_gA6LTHnNM6y0gbPCQ` |
+   | `CLOUDINARY_CLOUD_NAME` | `your_cloud_name` |
+   | `CLOUDINARY_API_KEY` | `your_api_key` |
+   | `CLOUDINARY_API_SECRET` | `your_api_secret` |
+   > Never commit real keys – use `backend/.env.example` as template and set secrets only in Vercel Dashboard.
 
 6. Click **Deploy**
 7. Once deployed, copy the URL (e.g., `https://image-to-url-backend.vercel.app`)
