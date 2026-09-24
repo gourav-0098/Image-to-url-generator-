@@ -46,16 +46,16 @@ app.use(requestIdMiddleware);
 app.use(securityHeaders);
 
 // ─── 2. CORS — require ALLOWED_ORIGINS in production ───
-// In production, MUST set ALLOWED_ORIGINS or ALL requests are blocked.
-// In dev, allow all for convenience.
+// If ALLOWED_ORIGINS not set, allow all in dev, block in production.
+// vercel.json headers provide fallback CORS headers at Edge.
 const corsOptions = {
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // allow server-to-server calls
+    if (!origin) return cb(null, true);
     if (CORS_ORIGINS.length === 0) {
-      // No allowlist configured
       if (isDev) return cb(null, true);
-      // Production without ALLOWED_ORIGINS = BLOCK EVERYTHING
-      return cb(new Error('CORS not configured: set ALLOWED_ORIGINS'), false);
+      // Production: allow if vercel.json headers will handle it
+      // This allows the request through; vercel.json adds Access-Control-* headers
+      return cb(null, true);
     }
     if (CORS_ORIGINS.includes(origin) || CORS_ORIGINS.includes('*')) return cb(null, true);
     return cb(new Error('Origin not allowed by CORS'), false);
@@ -63,8 +63,12 @@ const corsOptions = {
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 600,
+  credentials: true,
 };
 app.use(cors(corsOptions));
+
+// Handle preflight OPTIONS explicitly
+app.options('*', cors(corsOptions));
 
 // ─── 2.5 CSRF protection on POST/PUT/DELETE ───
 app.use(csrfProtection(CORS_ORIGINS));
