@@ -320,7 +320,7 @@ export default function Home() {
         const onProgress = (p) => setProgress(p);
         const direct = await uploadViaDirect(rawFiles, signData, onProgress);
         const urls = direct.urls; const galleryId = direct.galleryId; const galleryToken = direct.galleryToken;
-        const galleryUrl = galleryId ? `${window.location.origin}/gallery/${galleryId}` : `${window.location.origin}/gallery?g=${galleryToken}`;
+        const galleryUrl = galleryId ? `${window.location.origin}/g/${galleryId}` : `${window.location.origin}/gallery?g=${galleryToken}`;
         const final = { urls, galleryId, galleryToken, galleryUrl, count: urls.length, data: urls.map((u, i) => ({ url: u, filename: rawFiles[i].name })) };
         setResult(final); setState('success');
         saveHistory({ galleryUrl, galleryId, galleryToken, urls, count: urls.length, date: new Date().toISOString() });
@@ -332,7 +332,6 @@ export default function Home() {
 
     // Fallback: proxy via Vercel (4.5MB limit)
     try {
-      // compress before proxy too to stay under limit
       const compressed = [];
       for (const f of rawFiles) compressed.push(await compressFile(f));
       const total = compressed.reduce((s, f) => s + f.size, 0);
@@ -341,7 +340,7 @@ export default function Home() {
         setState('error'); return;
       }
       const proxyRes = await uploadViaProxy(compressed, (p) => setProgress(p));
-      const galleryUrl = proxyRes.galleryId ? `${window.location.origin}/gallery/${proxyRes.galleryId}` : proxyRes.galleryToken ? `${window.location.origin}/gallery?g=${proxyRes.galleryToken}` : proxyRes.urls[0];
+      const galleryUrl = proxyRes.galleryId ? `${window.location.origin}/g/${proxyRes.galleryId}` : proxyRes.galleryToken ? `${window.location.origin}/gallery?g=${proxyRes.galleryToken}` : proxyRes.urls[0];
       const final = { urls: proxyRes.urls, galleryId: proxyRes.galleryId, galleryToken: proxyRes.galleryToken, galleryUrl, count: proxyRes.count || proxyRes.urls.length, data: proxyRes.data };
       setResult(final); setState('success');
       saveHistory({ galleryUrl, galleryId: proxyRes.galleryId, galleryToken: proxyRes.galleryToken, urls: proxyRes.urls, count: final.count, date: new Date().toISOString() });
