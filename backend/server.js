@@ -33,7 +33,7 @@ if (missingEnv.length && process.env.NODE_ENV === 'production') {
 // ─── 1. Security Headers ───
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
-  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginOpenerPolicy: { policy: 'unsafe-none' },
   contentSecurityPolicy: false,
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   hsts: { maxAge: 31536000, includeSubDomains: true },
@@ -45,20 +45,26 @@ app.use(compression());
 app.use(requestIdMiddleware);
 app.use(securityHeaders);
 
-// ─── 2. CORS — require ALLOWED_ORIGINS in production ───
-// If ALLOWED_ORIGINS not set, allow all in dev, block in production.
-// vercel.json headers provide fallback CORS headers at Edge.
+// ─── 2. CORS ───
 const corsOptions = {
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
-    if (CORS_ORIGINS.length === 0) {
-      if (isDev) return cb(null, true);
-      // Production: allow if vercel.json headers will handle it
-      // This allows the request through; vercel.json adds Access-Control-* headers
+    if (CORS_ORIGINS.length === 0 || CORS_ORIGINS.includes('*')) {
       return cb(null, true);
     }
-    if (CORS_ORIGINS.includes(origin) || CORS_ORIGINS.includes('*')) return cb(null, true);
-    return cb(new Error('Origin not allowed by CORS'), false);
+    try {
+      const host = new URL(origin).hostname;
+      if (
+        CORS_ORIGINS.includes(origin) ||
+        CORS_ORIGINS.includes(host) ||
+        host.endsWith('.vercel.app') ||
+        host === 'localhost' ||
+        host === '127.0.0.1'
+      ) {
+        return cb(null, true);
+      }
+    } catch {}
+    return cb(null, false);
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

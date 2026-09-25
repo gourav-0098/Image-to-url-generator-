@@ -3,14 +3,14 @@ import { getGallery, createGallery } from '../config/galleryStore.js';
 
 const router = express.Router();
 
-// GET /api/v1/gallery/:id – resolve short ID to urls
+// GET /api/v1/gallery/:id – resolve short ID or stateless token to urls
 router.get('/gallery/:id', async (req, res) => {
   const { id } = req.params;
-  if (!id || id.length < 4 || id.length > 32) {
+  if (!id || id.length < 4) {
     return res.status(400).json({ success: false, error: 'Invalid gallery ID.' });
   }
   const urls = await getGallery(id);
-  if (!urls) {
+  if (!urls || urls.length === 0) {
     return res.status(404).json({ success: false, error: 'Gallery not found or expired.' });
   }
   return res.json({ success: true, count: urls.length, urls });

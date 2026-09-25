@@ -10,11 +10,11 @@ function sanitizeUrl(url) {
   return url.replace(/javascript:/gi, '').replace(/data:/gi, '').replace(/vbscript:/gi, '').trim();
 }
 
-function isValidCloudinaryUrl(url) {
+function isValidImageUrl(url) {
   if (typeof url !== 'string') return false;
   try {
     const u = new URL(url);
-    return u.protocol === 'https:' && (u.hostname.endsWith('cloudinary.com') || u.hostname.endsWith('res.cloudinary.com'));
+    return u.protocol === 'https:' || u.protocol === 'http:';
   } catch { return false; }
 }
 
@@ -25,15 +25,15 @@ function decodeUrls(token) {
     while (b64.length % 4) b64 += "=";
     const json = atob(b64);
     const arr = JSON.parse(json);
-    if (Array.isArray(arr)) return arr.filter(isValidCloudinaryUrl);
+    if (Array.isArray(arr)) return arr.filter(isValidImageUrl);
   } catch {}
   try {
     const arr = token.split(",").map((s) => decodeURIComponent(s.trim())).filter(Boolean);
-    if (arr.length > 0 && arr.every(isValidCloudinaryUrl)) return arr;
+    if (arr.length > 0 && arr.every(isValidImageUrl)) return arr;
   } catch {}
   try {
     const arr = JSON.parse(decodeURIComponent(token));
-    if (Array.isArray(arr)) return arr.filter(isValidCloudinaryUrl);
+    if (Array.isArray(arr)) return arr.filter(isValidImageUrl);
   } catch {}
   return [];
 }

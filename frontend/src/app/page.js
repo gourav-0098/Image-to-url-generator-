@@ -313,16 +313,32 @@ export default function Home() {
     setState('uploading'); setProgress(0); setError(''); setShowQR(false);
     const rawFiles = filesRef.current.map((f) => f.file);
 
+    // Helper to generate guaranteed working gallery link
+    const buildGalleryUrl = (urlsList, gId, gToken) => {
+      const token = gToken || btoa(JSON.stringify(urlsList)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      return `${window.location.origin}/gallery?g=${encodeURIComponent(token)}`;
+    };
+
     // Try direct (bypasses Vercel, supports >4.5MB, client compress)
     try {
       const signData = await getSignData();
       if (signData) {
         const onProgress = (p) => setProgress(p);
         const direct = await uploadViaDirect(rawFiles, signData, onProgress);
-        const urls = direct.urls; const galleryId = direct.galleryId; const galleryToken = direct.galleryToken;
-        const galleryUrl = galleryId ? `${window.location.origin}/g/${galleryId}` : `${window.location.origin}/gallery?g=${galleryToken}`;
-        const final = { urls, galleryId, galleryToken, galleryUrl, count: urls.length, data: urls.map((u, i) => ({ url: u, filename: rawFiles[i].name })) };
-        setResult(final); setState('success');
+        const urls = direct.urls;
+        const galleryToken = direct.galleryToken || btoa(JSON.stringify(urls)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const galleryId = direct.galleryId || galleryToken;
+        const galleryUrl = buildGalleryUrl(urls, galleryId, galleryToken);
+        const final = {
+          urls,
+          galleryId,
+          galleryToken,
+          galleryUrl,
+          count: urls.length,
+          data: urls.map((u, i) => ({ url: u, filename: rawFiles[i].name })),
+        };
+        setResult(final);
+        setState('success');
         saveHistory({ galleryUrl, galleryId, galleryToken, urls, count: urls.length, date: new Date().toISOString() });
         return;
       }
@@ -336,16 +352,29 @@ export default function Home() {
       for (const f of rawFiles) compressed.push(await compressFile(f));
       const total = compressed.reduce((s, f) => s + f.size, 0);
       if (total > MAX_TOTAL) {
-        setError(`Total compressed size ${(total / 1024 / 1024).toFixed(2)}MB exceeds 4.5MB. Try fewer files or enable direct upload (set CLOUDINARY vars).`);
-        setState('error'); return;
+        setError(`Total compressed size ${(total / 1024 / 1024).toFixed(2)}MB exceeds 4.5MB. Try fewer files or enable direct upload.`);
+        setState('error');
+        return;
       }
       const proxyRes = await uploadViaProxy(compressed, (p) => setProgress(p));
-      const galleryUrl = proxyRes.galleryId ? `${window.location.origin}/g/${proxyRes.galleryId}` : proxyRes.galleryToken ? `${window.location.origin}/gallery?g=${proxyRes.galleryToken}` : proxyRes.urls[0];
-      const final = { urls: proxyRes.urls, galleryId: proxyRes.galleryId, galleryToken: proxyRes.galleryToken, galleryUrl, count: proxyRes.count || proxyRes.urls.length, data: proxyRes.data };
-      setResult(final); setState('success');
-      saveHistory({ galleryUrl, galleryId: proxyRes.galleryId, galleryToken: proxyRes.galleryToken, urls: proxyRes.urls, count: final.count, date: new Date().toISOString() });
+      const urls = proxyRes.urls || [proxyRes.url];
+      const galleryToken = proxyRes.galleryToken || btoa(JSON.stringify(urls)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const galleryId = proxyRes.galleryId || galleryToken;
+      const galleryUrl = buildGalleryUrl(urls, galleryId, galleryToken);
+      const final = {
+        urls,
+        galleryId,
+        galleryToken,
+        galleryUrl,
+        count: proxyRes.count || urls.length,
+        data: proxyRes.data || urls.map((u, i) => ({ url: u, filename: compressed[i]?.name || `Image ${i + 1}` })),
+      };
+      setResult(final);
+      setState('success');
+      saveHistory({ galleryUrl, galleryId, galleryToken, urls, count: final.count, date: new Date().toISOString() });
     } catch (e) {
-      setError(e.message || 'Upload failed'); setState('error');
+      setError(e.message || 'Upload failed');
+      setState('error');
     }
   };
 
@@ -457,58 +486,104 @@ export default function Home() {
             <div className="flex flex-col gap-5 py-2">
               <div className="flex flex-col items-center gap-3">
                 <div className="rounded-full bg-emerald-500/15 p-3"><svg className="h-10 w-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg></div>
-                <p className="text-sm font-semibold text-emerald-400">{result.count === 1 ? "Upload Successful!" : `${result.count} Images Uploaded!`}</p>
-                {result.count > 1 && <p className="text-xs text-zinc-400 -mt-1">One gallery link opens all images</p>}
+                <p className="text-sm font-semibold text-emerald-400">{result.count === 1 ? "Image Uploaded Successfully!" : `${result.count} Images Uploaded!`}</p>
+                <p className="text-xs text-zinc-400 -mt-1">{result.count === 1 ? "Your permanent image URL is ready" : "Permanent gallery link opens all images"}</p>
               </div>
 
-              <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 p-4 flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Gallery Link</span>
-                  <span className="text-xs text-zinc-400">Single URL · Opens all {result.count} image{result.count !== 1 ? "s" : ""}</span>
-                </div>
-                <div className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-3 flex items-center gap-2">
-                  <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate">{result.galleryUrl}</a>
-                  <button onClick={copyGallery} aria-label="Copy gallery link" className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${copiedGallery ? "copy-success bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedGallery ? "Copied!" : "Copy"}</button>
-                </div>
-                <div className="flex gap-2">
-                  <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 transition">Open Gallery ↗</a>
-                  <button onClick={copyGallery} className="rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">{copiedGallery ? "Copied!" : "Copy Link"}</button>
-                  <button onClick={() => setShowQR(!showQR)} aria-label="Show QR code" className="rounded-lg border border-zinc-700 px-3 py-2.5 text-sm hover:bg-zinc-800" title="QR Code">
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.5A2.25 2.25 0 0 1 6 2.25h3A2.25 2.25 0 0 1 11.25 4.5v3A2.25 2.25 0 0 1 9 9.75H6A2.25 2.25 0 0 1 3.75 7.5v-3ZM3.75 16.5A2.25 2.25 0 0 1 6 14.25h3A2.25 2.25 0 0 1 11.25 16.5v3A2.25 2.25 0 0 1 9 21.75H6A2.25 2.25 0 0 1 3.75 19.5v-3ZM12.75 4.5A2.25 2.25 0 0 1 15 2.25h3A2.25 2.25 0 0 1 20.25 4.5v3A2.25 2.25 0 0 1 18 9.75h-3A2.25 2.25 0 0 1 12.75 7.5v-3ZM15 14.25h3.75M15 18h3.75M18 14.25v3.75" /></svg>
-                  </button>
-                </div>
-                {showQR && (
-                  <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.galleryUrl)}`} alt="QR for gallery link" className="w-44 h-44" loading="lazy" />
-                    <span className="text-xs text-zinc-600">Scan to open gallery</span>
+              {/* ─── PRIMARY CARD: Direct Link for single image, Gallery for multiple ─── */}
+              {result.count === 1 ? (
+                <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Direct Image URL</span>
+                    <span className="text-[11px] text-zinc-400">CDN Hosted · Permanent</span>
                   </div>
-                )}
-              </div>
 
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-xs font-medium text-zinc-400">Individual URLs</span>
-                  {result.urls.length > 1 && <button onClick={copyAll} className={`text-xs font-medium transition ${copiedAll ? "text-emerald-400" : "text-indigo-400 hover:text-indigo-300"}`}>{copiedAll ? "Copied all!" : "Copy all"}</button>}
-                </div>
-                <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                  {result.urls.map((url, idx) => (
-                    <div key={idx} className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-2.5 flex items-center gap-2">
-                      <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[10px] font-bold text-zinc-300">#{idx + 1}</span>
-                      <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate">{url}</a>
-                      <button onClick={() => copySingle(url, idx)} aria-label={`Copy URL ${idx + 1}`} className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${copiedIdx === idx ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === idx ? "Copied!" : "Copy"}</button>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2 overflow-x-auto py-1">
-                  {result.urls.map((u, i) => (
-                    <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950">
+                  {/* Direct Image URL copy box */}
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/90 p-3 flex items-center gap-2">
+                    <a href={result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open direct image">{result.urls[0]}</a>
+                    <button onClick={() => copySingle(result.urls[0], 0)} aria-label="Copy direct image URL" className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${copiedIdx === 0 ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === 0 ? "Copied!" : "Copy URL"}</button>
+                  </div>
+
+                  {/* Direct Action buttons */}
+                  <div className="flex gap-2">
+                    <a href={result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25">Open Image ↗</a>
+                    <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">Gallery View</a>
+                    <button onClick={() => setShowQR(!showQR)} aria-label="Show QR code" className="rounded-lg border border-zinc-700 px-3 py-2.5 text-sm hover:bg-zinc-800 text-zinc-300" title="QR Code">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.5A2.25 2.25 0 0 1 6 2.25h3A2.25 2.25 0 0 1 11.25 4.5v3A2.25 2.25 0 0 1 9 9.75H6A2.25 2.25 0 0 1 3.75 7.5v-3ZM3.75 16.5A2.25 2.25 0 0 1 6 14.25h3A2.25 2.25 0 0 1 11.25 16.5v3A2.25 2.25 0 0 1 9 21.75H6A2.25 2.25 0 0 1 3.75 19.5v-3ZM12.75 4.5A2.25 2.25 0 0 1 15 2.25h3A2.25 2.25 0 0 1 20.25 4.5v3A2.25 2.25 0 0 1 18 9.75h-3A2.25 2.25 0 0 1 12.75 7.5v-3ZM15 14.25h3.75M15 18h3.75M18 14.25v3.75" /></svg>
+                    </button>
+                  </div>
+
+                  {/* Image Preview container */}
+                  <a href={result.urls[0]} target="_blank" rel="noopener noreferrer" className="relative mt-1 block overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 max-h-56 group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={result.urls[0]} alt="Uploaded preview" className="w-full max-h-56 object-contain bg-zinc-950 group-hover:opacity-95 transition" />
+                    <span className="absolute bottom-2 right-2 bg-black/70 backdrop-blur text-white text-[10px] px-2 py-0.5 rounded">Click to expand</span>
+                  </a>
+
+                  {showQR && (
+                    <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg mt-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={u} alt={`uploaded ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
-                    </a>
-                  ))}
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.urls[0])}`} alt="QR for image" className="w-44 h-44" loading="lazy" />
+                      <span className="text-xs text-zinc-600">Scan to open image on phone</span>
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 p-4 flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Gallery Link</span>
+                    <span className="text-xs text-zinc-400">Single URL · Opens all {result.count} images</span>
+                  </div>
+                  <div className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-3 flex items-center gap-2">
+                    <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate">{result.galleryUrl}</a>
+                    <button onClick={copyGallery} aria-label="Copy gallery link" className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${copiedGallery ? "copy-success bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedGallery ? "Copied!" : "Copy"}</button>
+                  </div>
+                  <div className="flex gap-2">
+                    <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25">Open Gallery ↗</a>
+                    <button onClick={copyGallery} className="rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">{copiedGallery ? "Copied!" : "Copy Link"}</button>
+                    <button onClick={() => setShowQR(!showQR)} aria-label="Show QR code" className="rounded-lg border border-zinc-700 px-3 py-2.5 text-sm hover:bg-zinc-800" title="QR Code">
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.5A2.25 2.25 0 0 1 6 2.25h3A2.25 2.25 0 0 1 11.25 4.5v3A2.25 2.25 0 0 1 9 9.75H6A2.25 2.25 0 0 1 3.75 7.5v-3ZM3.75 16.5A2.25 2.25 0 0 1 6 14.25h3A2.25 2.25 0 0 1 11.25 16.5v3A2.25 2.25 0 0 1 9 21.75H6A2.25 2.25 0 0 1 3.75 19.5v-3ZM12.75 4.5A2.25 2.25 0 0 1 15 2.25h3A2.25 2.25 0 0 1 20.25 4.5v3A2.25 2.25 0 0 1 18 9.75h-3A2.25 2.25 0 0 1 12.75 7.5v-3ZM15 14.25h3.75M15 18h3.75M18 14.25v3.75" /></svg>
+                    </button>
+                  </div>
+                  {showQR && (
+                    <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.galleryUrl)}`} alt="QR for gallery link" className="w-44 h-44" loading="lazy" />
+                      <span className="text-xs text-zinc-600">Scan to open gallery</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ─── INDIVIDUAL URLS LIST ─── */}
+              {result.count > 1 && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-xs font-medium text-zinc-400">Individual URLs ({result.urls.length})</span>
+                    <button onClick={copyAll} className={`text-xs font-medium transition ${copiedAll ? "text-emerald-400" : "text-indigo-400 hover:text-indigo-300"}`}>{copiedAll ? "Copied all!" : "Copy all"}</button>
+                  </div>
+                  <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
+                    {result.urls.map((url, idx) => (
+                      <div key={idx} className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-2.5 flex items-center gap-2">
+                        <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[10px] font-bold text-zinc-300">#{idx + 1}</span>
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open original image">{url}</a>
+                        <button onClick={() => copySingle(url, idx)} aria-label={`Copy URL ${idx + 1}`} className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${copiedIdx === idx ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === idx ? "Copied!" : "Copy"}</button>
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-md bg-zinc-800 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 transition" title="Open original">
+                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto py-1">
+                    {result.urls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noopener noreferrer" className="shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 hover:border-indigo-500 transition" title="Click to view">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={u} alt={`uploaded ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <button onClick={reset} className="rounded-lg border border-zinc-700 px-6 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">Upload More</button>
             </div>

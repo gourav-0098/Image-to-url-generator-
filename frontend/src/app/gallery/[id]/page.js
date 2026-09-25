@@ -6,6 +6,20 @@ import Link from "next/link";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://image-to-url-generator.vercel.app";
 
+function tryDecodeToken(token) {
+  if (!token || typeof token !== "string") return null;
+  try {
+    let b64 = token.replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    const json = atob(b64);
+    const parsed = JSON.parse(json);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((u) => typeof u === "string" && u.startsWith("http"));
+    }
+  } catch {}
+  return null;
+}
+
 export default function GalleryById() {
   const { id } = useParams();
   const [urls, setUrls] = useState(null);
@@ -16,10 +30,20 @@ export default function GalleryById() {
 
   useEffect(() => {
     if (!id) return;
+
+    // 1. Try decoding as stateless token
+    const fromToken = tryDecodeToken(id);
+    if (fromToken && fromToken.length > 0) {
+      setUrls(fromToken);
+      return;
+    }
+
+    // 2. Fetch from backend
     fetch(`${API_BASE}/api/v1/gallery/${id}`)
       .then(async (r) => {
         const data = await r.json();
-        if (!r.ok) throw new Error(data.error || "Not found");
+        if (!r.ok) throw new Error(data.error || "Gallery not found or expired");
+        if (!Array.isArray(data.urls) || data.urls.length === 0) throw new Error("No images found in gallery");
         setUrls(data.urls);
       })
       .catch((e) => setError(e.message));
@@ -37,11 +61,23 @@ export default function GalleryById() {
   }, [lightbox, urls]);
 
   const copy = async (text, idx = null) => {
-    try { await navigator.clipboard.writeText(text); } catch {
-      const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
     }
-    if (idx !== null) { setCopiedIdx(idx); setTimeout(() => setCopiedIdx(null), 1500); }
-    else { setCopiedGallery(true); setTimeout(() => setCopiedGallery(false), 2000); }
+    if (idx !== null) {
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx(null), 1500);
+    } else {
+      setCopiedGallery(true);
+      setTimeout(() => setCopiedGallery(false), 2000);
+    }
   };
 
   if (error) {
@@ -51,13 +87,14 @@ export default function GalleryById() {
           <div className="card-glow rounded-2xl border border-zinc-800 bg-zinc-900/70 p-8">
             <h1 className="text-lg font-semibold text-zinc-100">Gallery not found</h1>
             <p className="mt-2 text-sm text-zinc-400 break-words">{error}</p>
-            <p className="mt-1 text-xs text-zinc-500">ID: <code className="bg-zinc-800 px-1 py-0.5 rounded">{id}</code> may have expired (30 days).</p>
+            <p className="mt-1 text-xs text-zinc-500">ID: <code className="bg-zinc-800 px-1 py-0.5 rounded">{id}</code></p>
             <Link href="/" className="mt-6 inline-flex rounded-lg bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">Upload Images</Link>
           </div>
         </div>
       </main>
     );
   }
+
   if (!urls) {
     return <main className="flex-1 flex items-center justify-center p-12"><span className="text-sm text-zinc-500">Loading gallery…</span></main>;
   }
@@ -70,7 +107,7 @@ export default function GalleryById() {
         <div>
           <Link href="/" className="text-xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">ImgDrive</Link>
           <h1 className="text-lg font-semibold text-zinc-100 mt-1">Shared Gallery</h1>
-          <p className="text-sm text-zinc-400">{urls.length} image{urls.length !== 1 ? "s" : ""} · Short link <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300">{id}</code></p>
+          <p className="text-sm text-zinc-400">{urls.length} image{urls.length !== 1 ? "s" : ""} · Permanent share link</p>
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={() => copy(galleryLink)} className={`rounded-lg px-4 py-2 text-sm font-medium transition border ${copiedGallery ? "bg-emerald-600 border-emerald-600 text-white" : "bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700"}`}>{copiedGallery ? "Copied!" : "Copy Gallery Link"}</button>
@@ -87,8 +124,15 @@ export default function GalleryById() {
               <span className="absolute top-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] px-2 py-1 rounded-full font-medium">#{idx + 1}</span>
             </button>
             <div className="p-3 flex items-center gap-2">
-              <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate">{url}</a>
+              <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title={url}>
+                {url}
+              </a>
               <button onClick={() => copy(url, idx)} className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${copiedIdx === idx ? "bg-emerald-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"}`}>{copiedIdx === idx ? "Copied!" : "Copy"}</button>
+              <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-md bg-zinc-800 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 transition" title="Open original image">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+              </a>
             </div>
           </div>
         ))}
@@ -100,7 +144,7 @@ export default function GalleryById() {
             <span className="text-sm text-zinc-300">{lightbox + 1} / {urls.length}</span>
             <div className="flex items-center gap-2">
               <button onClick={() => copy(urls[lightbox])} className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700">Copy URL</button>
-              <a href={urls[lightbox]} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500">Open Original</a>
+              <a href={urls[lightbox]} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500">Open Original ↗</a>
               <button onClick={() => setLightbox(null)} aria-label="Close" className="rounded-full bg-zinc-800 p-2 text-zinc-300 hover:bg-zinc-700"><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button>
             </div>
           </div>

@@ -5,17 +5,29 @@ const CSP_STRING = Object.entries(CSP_DIRECTIVES)
   .join('; ');
 
 // ─── CSRF protection – reject POST without valid Origin/Referer ───
-export function csrfProtection(allowedOrigins) {
+export function csrfProtection(allowedOrigins = []) {
   return (req, res, next) => {
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+      // If no restrictions or wildcard configured, allow
+      if (!allowedOrigins || allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
+        return next();
+      }
       const origin = req.headers.origin || '';
       const referer = req.headers.referer || '';
-      // Allow if origin/referer matches our allowed origins
-      const host = origin ? new URL(origin).hostname : (referer ? new URL(referer).hostname : '');
-      if (host && (allowedOrigins.includes(host) || allowedOrigins.includes('*'))) return next();
-      // Allow same-origin direct calls (no origin header) for server-to-server
       if (!origin && !referer) return next();
-      return res.status(403).json({ success: false, error: 'CSRF token missing or invalid.' });
+      try {
+        const host = origin ? new URL(origin).hostname : new URL(referer).hostname;
+        if (
+          allowedOrigins.includes(host) ||
+          allowedOrigins.includes(`https://${host}`) ||
+          host.endsWith('.vercel.app') ||
+          host === 'localhost' ||
+          host === '127.0.0.1'
+        ) {
+          return next();
+        }
+      } catch {}
+      return res.status(403).json({ success: false, error: 'CSRF validation failed.' });
     }
     next();
   };
@@ -24,12 +36,11 @@ export function csrfProtection(allowedOrigins) {
 // ─── Security headers middleware ───
 export function securityHeaders(req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.setHeader('Content-Security-Policy', CSP_STRING);
   res.setHeader('X-Request-Id', `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
@@ -38,16 +49,27 @@ export function securityHeaders(req, res, next) {
 }
 
 // ─── Hotlink protection – validate Referer or Origin ───
-export function hotlinkProtection(allowedOrigins) {
+export function hotlinkProtection(allowedOrigins = []) {
   return (req, res, next) => {
     if (req.method === 'GET') {
+      if (!allowedOrigins || allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
+        return next();
+      }
       const referer = req.headers.referer || '';
       const origin = req.headers.origin || '';
-      // Allow direct API calls (no referer) or same-origin
       if (!referer && !origin) return next();
-      if (allowedOrigins.length === 0) return next();
-      const host = new URL(referer || origin).hostname;
-      if (allowedOrigins.includes(host) || allowedOrigins.includes('*')) return next();
+      try {
+        const host = new URL(referer || origin).hostname;
+        if (
+          allowedOrigins.includes(host) ||
+          allowedOrigins.includes(`https://${host}`) ||
+          host.endsWith('.vercel.app') ||
+          host === 'localhost' ||
+          host === '127.0.0.1'
+        ) {
+          return next();
+        }
+      } catch {}
       return res.status(403).json({ success: false, error: 'Hotlink protection blocked this request.' });
     }
     next();
