@@ -10,21 +10,19 @@ const nextConfig = {
     ],
     formats: ['image/avif', 'image/webp'],
   },
-  // Free tier: keep bundle lean
   experimental: {
     optimizePackageImports: ['react', 'react-dom'],
   },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production',
   },
-  // Cache static assets aggressively
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
@@ -33,13 +31,13 @@ const nextConfig = {
       {
         source: '/gallery/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'public, s-maxage=86400, stale-while-revalidate=604800' },
+          { key: 'Cache-Control', value: 'no-store, must-revalidate' },
         ],
       },
       {
         source: '/g/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'public, s-maxage=60, stale-while-revalidate=300' },
+          { key: 'Cache-Control', value: 'no-store, must-revalidate' },
         ],
       },
       {

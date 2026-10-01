@@ -59,12 +59,26 @@ export default function Home() {
   const filesRef = useRef(files);
   useEffect(() => { filesRef.current = files; }, [files]);
 
-  // Load history
+  // Load history and auto-heal any old /g/shortId links using saved urls/token
   useEffect(() => {
     try {
       const raw = localStorage.getItem(HISTORY_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (raw) setHistory(JSON.parse(raw).slice(0, 10));
+      if (raw) {
+        const parsed = JSON.parse(raw).slice(0, 10).map((item) => {
+          if (Array.isArray(item.urls) && item.urls.length > 0) {
+            const token = item.galleryToken || btoa(JSON.stringify(item.urls)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+            return {
+              ...item,
+              galleryToken: token,
+              galleryUrl: `${window.location.origin}/gallery?g=${encodeURIComponent(token)}`,
+            };
+          }
+          return item;
+        });
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setHistory(parsed);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(parsed));
+      }
     } catch {}
   }, []);
   const saveHistory = (entry) => {
