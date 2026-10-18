@@ -17,8 +17,8 @@ const API_URL_SINGLE = `${API_BASE}/api/v1/upload`;
 const API_URL_BATCH = `${API_BASE}/api/v1/upload/batch`;
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
-const MAX_SIZE = 4.5 * 1024 * 1024;
-const MAX_TOTAL = 4.5 * 1024 * 1024;
+const MAX_SIZE = 25 * 1024 * 1024; // 25 MB (Cloudinary limit)
+const MAX_TOTAL = 50 * 1024 * 1024; // 50 MB batch
 const MAX_FILES = 10;
 const HISTORY_KEY = "imgdrive_history";
 const getBadgeClass = (n) => n <= 5 ? "bg-emerald-500/20 text-emerald-400" : n <= 8 ? "bg-amber-500/20 text-amber-400" : "bg-red-500/20 text-red-400";
@@ -108,7 +108,7 @@ export default function Home() {
     const currentTotal = current.reduce((s, f) => s + f.file.size, 0);
     const incomingTotal = incoming.reduce((s, f) => s + f.size, 0);
     if (currentTotal + incomingTotal > MAX_TOTAL) {
-      setError(`Total size would be ${((currentTotal + incomingTotal) / (1024 * 1024)).toFixed(2)}MB — Vercel limit is 4.5MB total per request. Remove some files.`);
+      setError(`Total batch size would be ${((currentTotal + incomingTotal) / (1024 * 1024)).toFixed(2)}MB — max 50MB per batch. Remove some files.`);
       setState("error");
       return;
     }
@@ -119,7 +119,7 @@ export default function Home() {
         return;
       }
       if (f.size > MAX_SIZE) {
-        setError(`"${f.name}" exceeds 4.5 MB limit (${(f.size / (1024 * 1024)).toFixed(2)} MB).`);
+        setError(`"${f.name}" exceeds 25 MB limit (${(f.size / (1024 * 1024)).toFixed(2)} MB).`);
         setState("error");
         return;
       }
@@ -183,9 +183,11 @@ export default function Home() {
     if (e.dataTransfer.files?.length) validateAndPreview(e.dataTransfer.files);
   };
 
-  // ── Client-side compression (bypasses Vercel limit, saves bandwidth) ──
-  const compressFile = async (file) => {
-    if (file.size < 1.1 * 1024 * 1024) return file; // skip small
+  // ── High-Efficiency Client-Side WebP Converter (JPEG / PNG -> WebP) ──
+  const compressToWebp = async (file) => {
+    // If already small WebP (<500KB), keep as is
+    if (file.type === 'image/webp' && file.size < 500 * 1024) return file;
+
     try {
       const bitmap = await createImageBitmap(file).catch(async () => {
         const url = URL.createObjectURL(file);
@@ -198,24 +200,41 @@ export default function Home() {
         URL.revokeObjectURL(url);
         return img;
       });
-      const maxW = 1920;
-      let w = bitmap.width || bitmap.naturalWidth, h = bitmap.height || bitmap.naturalHeight;
+
+      const maxDim = 2560; // Crisp 2K resolution ceiling
+      let w = bitmap.width || bitmap.naturalWidth;
+      let h = bitmap.height || bitmap.naturalHeight;
       if (!w || !h) return file;
-      const ratio = Math.min(1, maxW / Math.max(w, h));
-      const nw = Math.round(w * ratio), nh = Math.round(h * ratio);
+
+      const ratio = Math.min(1, maxDim / Math.max(w, h));
+      const nw = Math.round(w * ratio);
+      const nh = Math.round(h * ratio);
+
       const canvas = document.createElement('canvas');
-      canvas.width = nw; canvas.height = nh;
-      const ctx = canvas.getContext('2d');
-      // @ts-ignore
-      if (bitmap instanceof ImageBitmap) ctx.drawImage(bitmap, 0, 0, nw, nh);
-      else ctx.drawImage(bitmap, 0, 0, nw, nh);
-      if (bitmap.close) try { bitmap.close(); } catch {}
-      const outType = file.type === 'image/png' ? 'image/webp' : 'image/jpeg';
-      const blob = await new Promise((res) => canvas.toBlob(res, outType, 0.78));
+      canvas.width = nw;
+      canvas.height = nh;
+      const ctx = canvas.getContext('2d', { alpha: true });
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      if (bitmap instanceof ImageBitmap) {
+        ctx.drawImage(bitmap, 0, 0, nw, nh);
+        if (bitmap.close) try { bitmap.close(); } catch {}
+      } else {
+        ctx.drawImage(bitmap, 0, 0, nw, nh);
+      }
+
+      // Convert all JPEGs, PNGs, etc. to modern WebP (82% quality, near-lossless to human eyes)
+      const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', 0.82));
       if (!blob || blob.size >= file.size) return file;
-      const newName = file.name.replace(/\.[^.]+$/, outType === 'image/webp' ? '.webp' : '.jpg');
-      return new File([blob], newName, { type: blob.type });
-    } catch { return file; }
+
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      const newName = `${baseName}.webp`;
+      return new File([blob], newName, { type: 'image/webp', lastModified: Date.now() });
+    } catch (e) {
+      console.warn('[WebP Compressor] Error compressing, using original:', e.message);
+      return file;
+    }
   };
 
   const getSignData = async () => {
@@ -238,7 +257,7 @@ export default function Home() {
     const urls = [];
     let completed = 0;
     for (let i = 0; i < filesList.length; i++) {
-      const f = await compressFile(filesList[i]);
+      const f = await compressToWebp(filesList[i]);
       const fd = new FormData();
       fd.append('file', f);
       fd.append('api_key', signData.apiKey);
@@ -419,10 +438,10 @@ export default function Home() {
     // Fallback: proxy via Vercel (4.5MB limit)
     try {
       const compressed = [];
-      for (const f of rawFiles) compressed.push(await compressFile(f));
+      for (const f of rawFiles) compressed.push(await compressToWebp(f));
       const total = compressed.reduce((s, f) => s + f.size, 0);
       if (total > MAX_TOTAL) {
-        setError(`Total compressed size ${(total / 1024 / 1024).toFixed(2)}MB exceeds 4.5MB. Try fewer files or enable direct upload.`);
+        setError(`Total compressed size ${(total / 1024 / 1024).toFixed(2)}MB exceeds 50MB. Try fewer files.`);
         setState('error');
         return;
       }
@@ -520,7 +539,7 @@ export default function Home() {
                 <svg className="h-8 w-8 text-zinc-400 group-hover:text-indigo-400 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" /></svg>
               </div>
               <p className="text-sm text-zinc-400"><span className="font-medium text-indigo-400">Click to browse</span> or drag &amp; drop</p>
-              <p className="text-xs text-zinc-500">JPEG, PNG, WebP, AVIF · Max 4.5 MB each · Up to {MAX_FILES} files · Total ≤4.5MB</p>
+              <p className="text-xs text-zinc-500">JPEG, PNG, WebP, AVIF · Auto-optimized to WebP · Up to 25 MB each</p>
               <input ref={inputRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" className="hidden" onChange={handleFileInput} aria-hidden="true" />
             </div>
           )}
@@ -553,11 +572,11 @@ export default function Home() {
                     <span className={`inline-flex items-center justify-center w-6 h-5 rounded-full text-[10px] font-bold ${getBadgeClass(files.length)}`}>{files.length}/{MAX_FILES}</span>
                     <span className="text-zinc-500">{totalSizeMB.toFixed(2)} MB</span>
                   </div>
-                  <span className={totalSizeMB > 4.5 ? "text-amber-400" : "text-zinc-600"}>{totalSizeMB > 4.5 ? "⚠ Exceeds 4.5MB limit" : "Single gallery link will be created"}</span>
+                  <span className="text-zinc-500">⚡ Auto-compressed to WebP before upload</span>
                 </div>
               <div className="flex gap-3">
                 <button onClick={reset} className="flex-1 rounded-lg border border-zinc-700 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">Cancel</button>
-                <button onClick={upload} disabled={totalSizeMB > 4.5} className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 disabled:cursor-not-allowed">Upload {files.length > 1 ? `${files.length} Images` : "Image"}</button>
+                <button onClick={upload} disabled={totalSizeMB > 50} className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25 disabled:opacity-50 disabled:cursor-not-allowed">Upload {files.length > 1 ? `${files.length} Images` : "Image"}</button>
               </div>
             </div>
           )}
