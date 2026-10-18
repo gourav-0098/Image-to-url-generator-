@@ -3,6 +3,7 @@ import path from 'path';
 import cloudinary from '../config/cloudinary.js';
 import { validateTotalSize, MAX_TOTAL_SIZE } from '../config/multer.js';
 import { createGallery } from '../config/galleryStore.js';
+import { createShortUrl } from '../services/shortUrlService.js';
 import { cloudinaryBreaker, circuitBreakerWrapper } from '../middleware/circuitBreaker.js';
 import { memoryCheck } from '../middleware/memory.js';
 import { sanitizeUrl } from '../middleware/security.js';
@@ -60,13 +61,30 @@ export const uploadImage = async (req, res) => {
       cloudinaryBreaker,
       () => Promise.reject(new Error('Cloudinary service temporarily unavailable'))
     );
+
+    const shortId = await createShortUrl({
+      url: result.secure_url,
+      metadata: {
+        filename: sanitizeFilename(originalname),
+        mimetype,
+        size: `${(size / (1024 * 1024)).toFixed(2)} MB`,
+        format: result.format,
+        width: result.width,
+        height: result.height,
+      },
+      type: 'image',
+    });
+
     const galleryId = await createGallery([result.secure_url]);
     const galleryToken = Buffer.from(JSON.stringify([result.secure_url])).toString('base64url');
 
     return res.status(200).json({
       success: true,
       url: result.secure_url,
-      galleryId,
+      shortId: shortId || null,
+      shortUrl: shortId ? `/s/${shortId}` : result.secure_url,
+      galleryId: galleryId || shortId,
+      galleryUrl: galleryId ? `/gallery?id=${galleryId}` : `/gallery?g=${galleryToken}`,
       galleryToken,
       data: {
         fileId: result.public_id,
@@ -76,6 +94,8 @@ export const uploadImage = async (req, res) => {
         format: result.format,
         width: result.width,
         height: result.height,
+        shortId: shortId || null,
+        shortUrl: shortId ? `/s/${shortId}` : result.secure_url,
       },
     });
   } catch (err) {
@@ -96,13 +116,33 @@ export const uploadMultipleImages = async (req, res) => {
   }
 
   if (files.length === 1) {
-    const result = await handleSingleFile(files[0]);
-    if (result.error) return res.status(result.status).json({ success: false, error: result.error });
-    const galleryToken = Buffer.from(JSON.stringify([result.result.secure_url])).toString('base64url');
-    const galleryId = await createGallery([result.result.secure_url]);
+    const singleRes = await handleSingleFile(files[0]);
+    if (singleRes.error) return res.status(singleRes.status).json({ success: false, error: singleRes.error });
+    const { result, shortId } = singleRes;
+    const galleryToken = Buffer.from(JSON.stringify([result.secure_url])).toString('base64url');
+    const galleryId = await createGallery([result.secure_url]);
     return res.status(200).json({
-      success: true, count: 1, urls: [result.result.secure_url], galleryToken, galleryId,
-      data: [{ fileId: result.result.public_id, filename: sanitizeFilename(files[0].originalname), mimetype: files[0].mimetype, size: `${(files[0].size / (1024 * 1024)).toFixed(2)} MB`, format: result.result.format, width: result.result.width, height: result.result.height, url: result.result.secure_url }],
+      success: true,
+      count: 1,
+      urls: [result.secure_url],
+      shortId: shortId || null,
+      shortUrl: shortId ? `/s/${shortId}` : result.secure_url,
+      shortIds: shortId ? [shortId] : [],
+      galleryToken,
+      galleryId,
+      galleryUrl: galleryId ? `/gallery?id=${galleryId}` : `/gallery?g=${galleryToken}`,
+      data: [{
+        fileId: result.public_id,
+        filename: sanitizeFilename(files[0].originalname),
+        mimetype: files[0].mimetype,
+        size: `${(files[0].size / (1024 * 1024)).toFixed(2)} MB`,
+        format: result.format,
+        width: result.width,
+        height: result.height,
+        url: result.secure_url,
+        shortId: shortId || null,
+        shortUrl: shortId ? `/s/${shortId}` : result.secure_url,
+      }],
     });
   }
 
@@ -111,20 +151,50 @@ export const uploadMultipleImages = async (req, res) => {
       const cleanName = sanitizeFilename(path.parse(f.originalname).name);
       const publicId = `${cleanName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const result = await circuitBreakerWrapper(() => uploadWithRetry(f.buffer, publicId), cloudinaryBreaker, () => Promise.reject(new Error('Cloudinary unavailable')));
-      return { result, file: f };
+      const shortId = await createShortUrl({
+        url: result.secure_url,
+        metadata: {
+          filename: sanitizeFilename(f.originalname),
+          mimetype: f.mimetype,
+          size: `${(f.size / (1024 * 1024)).toFixed(2)} MB`,
+          format: result.format,
+          width: result.width,
+          height: result.height,
+        },
+        type: 'image',
+      });
+      return { result, file: f, shortId };
     });
 
     const settled = await Promise.all(uploads);
     const urls = settled.map((s) => s.result.secure_url);
+    const shortIds = settled.map((s) => s.shortId);
     const galleryToken = Buffer.from(JSON.stringify(urls)).toString('base64url');
     const galleryId = await createGallery(urls);
 
-    const data = settled.map(({ result, file }) => ({
-      fileId: result.public_id, filename: sanitizeFilename(file.originalname), mimetype: file.mimetype,
-      size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`, format: result.format, width: result.width, height: result.height, url: result.secure_url,
+    const data = settled.map(({ result, file, shortId }) => ({
+      fileId: result.public_id,
+      filename: sanitizeFilename(file.originalname),
+      mimetype: file.mimetype,
+      size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+      format: result.format,
+      width: result.width,
+      height: result.height,
+      url: result.secure_url,
+      shortId: shortId || null,
+      shortUrl: shortId ? `/s/${shortId}` : result.secure_url,
     }));
 
-    return res.status(200).json({ success: true, count: urls.length, urls, galleryToken, galleryId, data });
+    return res.status(200).json({
+      success: true,
+      count: urls.length,
+      urls,
+      shortIds,
+      galleryToken,
+      galleryId,
+      galleryUrl: galleryId ? `/gallery?id=${galleryId}` : `/gallery?g=${galleryToken}`,
+      data,
+    });
   } catch (err) {
     console.error('[Cloudinary Batch Error]:', err.message);
     return res.status(503).json({ success: false, error: 'Service temporarily unavailable.' });
@@ -136,7 +206,19 @@ async function handleSingleFile(file) {
   const publicId = `${cleanName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   try {
     const result = await circuitBreakerWrapper(() => uploadWithRetry(file.buffer, publicId), cloudinaryBreaker, () => Promise.reject(new Error('Cloudinary unavailable')));
-    return { result };
+    const shortId = await createShortUrl({
+      url: result.secure_url,
+      metadata: {
+        filename: sanitizeFilename(file.originalname),
+        mimetype: file.mimetype,
+        size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+        format: result.format,
+        width: result.width,
+        height: result.height,
+      },
+      type: 'image',
+    });
+    return { result, shortId };
   } catch (e) {
     return { error: 'Service temporarily unavailable.', status: 503 };
   }

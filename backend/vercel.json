@@ -30,7 +30,17 @@
     },
     {
       "source": "/g/:path*",
-      "headers": [{ "key": "Cache-Control", "value": "public, s-maxage=60, stale-while-revalidate=300" }]
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, s-maxage=60, stale-while-revalidate=300" }
+      ]
+    },
+    {
+      "source": "/s/:path*",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, s-maxage=300" }
+      ]
     }
   ],
   "crons": [

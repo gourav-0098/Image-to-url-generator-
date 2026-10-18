@@ -50,6 +50,7 @@ export default function Home() {
   const [copiedGallery, setCopiedGallery] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState(null);
   const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedShort, setCopiedShort] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [history, setHistory] = useState([]);
@@ -273,24 +274,43 @@ export default function Home() {
       completed++;
       onProgress(Math.round((completed / filesList.length) * 100));
     }
-    // create short gallery id via backend (or frontend route)
-    let galleryId = null, galleryToken = null;
+    // create short gallery id & short URLs via backend shorten endpoint
+    let galleryId = null, galleryToken = null, shortIds = [], shortUrls = [];
     try {
-      const r = await fetch(`${API_BASE}/api/v1/gallery`, {
+      const r = await fetch(`${API_BASE}/api/v1/shorten`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls }),
       });
       if (r.ok) {
         const j = await r.json();
-        galleryId = j.galleryId; galleryToken = j.galleryToken;
+        galleryId = j.galleryId;
+        if (Array.isArray(j.items)) {
+          shortIds = j.items.map((it) => it.shortId);
+          shortUrls = j.items.map((it) => it.shortUrl);
+        }
       }
     } catch {}
+
     if (!galleryId) {
-      // fallback stateless token
+      try {
+        const r2 = await fetch(`${API_BASE}/api/v1/gallery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls }),
+        });
+        if (r2.ok) {
+          const j2 = await r2.json();
+          galleryId = j2.galleryId;
+          galleryToken = j2.galleryToken;
+        }
+      } catch {}
+    }
+
+    if (!galleryId) {
       galleryToken = btoa(JSON.stringify(urls)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
-    return { urls, galleryId, galleryToken };
+    return { urls, galleryId, galleryToken, shortIds, shortUrls };
   };
 
   const uploadViaProxy = (filesList, onProgress) => new Promise((resolve, reject) => {
@@ -308,10 +328,25 @@ export default function Home() {
         try {
           const res = JSON.parse(xhr.responseText);
           if (!res.success) return reject(new Error(res.error || 'Upload failed'));
-          let urls, galleryToken, galleryId, data, count;
-          if (res.urls) { urls = res.urls; galleryToken = res.galleryToken; galleryId = res.galleryId; data = res.data; count = res.count; }
-          else { urls = [res.url]; data = [res.data]; count = 1; galleryToken = res.galleryToken || ''; galleryId = res.galleryId || ''; }
-          resolve({ urls, galleryToken, galleryId, data, count });
+          let urls, galleryToken, galleryId, data, count, shortId, shortUrl, shortIds;
+          if (res.urls) {
+            urls = res.urls;
+            galleryToken = res.galleryToken;
+            galleryId = res.galleryId;
+            data = res.data;
+            count = res.count;
+            shortIds = res.shortIds || [];
+          } else {
+            urls = [res.url];
+            data = [res.data];
+            count = 1;
+            galleryToken = res.galleryToken || '';
+            galleryId = res.galleryId || '';
+            shortId = res.shortId || null;
+            shortUrl = res.shortUrl || null;
+            shortIds = shortId ? [shortId] : [];
+          }
+          resolve({ urls, galleryToken, galleryId, data, count, shortId, shortUrl, shortIds });
         } catch (e) { reject(e); }
       } else {
         try { const j = JSON.parse(xhr.responseText); reject(new Error(j.error || `Upload failed ${xhr.status}`)); }
@@ -327,10 +362,20 @@ export default function Home() {
     setState('uploading'); setProgress(0); setError(''); setShowQR(false);
     const rawFiles = filesRef.current.map((f) => f.file);
 
-    // Helper to generate guaranteed working gallery link
+    // Helper to generate clean shortened gallery link
     const buildGalleryUrl = (urlsList, gId, gToken) => {
+      if (gId && typeof gId === 'string' && gId.length <= 16) {
+        return `${window.location.origin}/g/${gId}`;
+      }
       const token = gToken || btoa(JSON.stringify(urlsList)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       return `${window.location.origin}/gallery?g=${encodeURIComponent(token)}`;
+    };
+
+    const buildShortImageUrl = (sId, originalUrl) => {
+      if (sId && typeof sId === 'string' && sId.length <= 16) {
+        return `${window.location.origin}/s/${sId}`;
+      }
+      return originalUrl;
     };
 
     // Try direct (bypasses Vercel, supports >4.5MB, client compress)
@@ -343,13 +388,24 @@ export default function Home() {
         const galleryToken = direct.galleryToken || btoa(JSON.stringify(urls)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         const galleryId = direct.galleryId || galleryToken;
         const galleryUrl = buildGalleryUrl(urls, galleryId, galleryToken);
+        const shortIds = direct.shortIds || [];
+        const shortId = shortIds[0] || null;
+        const shortUrl = buildShortImageUrl(shortId, urls[0]);
         const final = {
           urls,
+          shortId,
+          shortUrl,
+          shortIds,
           galleryId,
           galleryToken,
           galleryUrl,
           count: urls.length,
-          data: urls.map((u, i) => ({ url: u, filename: rawFiles[i].name })),
+          data: urls.map((u, i) => ({
+            url: u,
+            filename: rawFiles[i].name,
+            shortId: shortIds[i] || null,
+            shortUrl: buildShortImageUrl(shortIds[i], u),
+          })),
         };
         setResult(final);
         setState('success');
@@ -375,13 +431,23 @@ export default function Home() {
       const galleryToken = proxyRes.galleryToken || btoa(JSON.stringify(urls)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const galleryId = proxyRes.galleryId || galleryToken;
       const galleryUrl = buildGalleryUrl(urls, galleryId, galleryToken);
+      const shortIds = proxyRes.shortIds || (proxyRes.shortId ? [proxyRes.shortId] : []);
+      const shortId = shortIds[0] || proxyRes.shortId || null;
+      const shortUrl = buildShortImageUrl(shortId, urls[0]);
       const final = {
         urls,
+        shortId,
+        shortUrl,
+        shortIds,
         galleryId,
         galleryToken,
         galleryUrl,
         count: proxyRes.count || urls.length,
-        data: proxyRes.data || urls.map((u, i) => ({ url: u, filename: compressed[i]?.name || `Image ${i + 1}` })),
+        data: (proxyRes.data || urls.map((u, i) => ({ url: u, filename: compressed[i]?.name || `Image ${i + 1}` }))).map((d, i) => ({
+          ...d,
+          shortId: shortIds[i] || d.shortId || null,
+          shortUrl: buildShortImageUrl(shortIds[i] || d.shortId, d.url || urls[i]),
+        })),
       };
       setResult(final);
       setState('success');
@@ -398,6 +464,13 @@ export default function Home() {
     setCopiedGallery(true);
     setTimeout(() => setCopiedGallery(false), 2000);
   };
+  const copyShort = async () => {
+    const target = result?.shortUrl || result?.urls?.[0];
+    if (!target) return;
+    await copyWithFallback(sanitizeUrl(target));
+    setCopiedShort(true);
+    setTimeout(() => setCopiedShort(false), 2000);
+  };
   const copySingle = async (url, idx) => {
     await copyWithFallback(sanitizeUrl(url));
     setCopiedIdx(idx);
@@ -405,13 +478,15 @@ export default function Home() {
   };
   const copyAll = async () => {
     if (!result?.urls) return;
-    await copyWithFallback(result.urls.join("\n"));
+    const allLinks = (result.data || []).map((d) => d.shortUrl || d.url).filter(Boolean);
+    const toCopy = allLinks.length > 0 ? allLinks : result.urls;
+    await copyWithFallback(toCopy.join("\n"));
     setCopiedAll(true);
     setTimeout(() => setCopiedAll(false), 2000);
   };
 
   const reset = () => {
-    setState("idle"); setFiles([]); setProgress(0); setResult(null); setError(""); setCopiedGallery(false); setCopiedIdx(null); setCopiedAll(false); setShowQR(false);
+    setState("idle"); setFiles([]); setProgress(0); setResult(null); setError(""); setCopiedGallery(false); setCopiedIdx(null); setCopiedAll(false); setCopiedShort(false); setShowQR(false);
     if (inputRef.current) inputRef.current.value = "";
   };
 
@@ -504,26 +579,34 @@ export default function Home() {
                 <p className="text-xs text-zinc-400 -mt-1">{result.count === 1 ? "Your permanent image URL is ready" : "Permanent gallery link opens all images"}</p>
               </div>
 
-              {/* ─── PRIMARY CARD: Direct Link for single image, Gallery for multiple ─── */}
+              {/* ─── PRIMARY CARD: Short Link for single image, Gallery for multiple ─── */}
               {result.count === 1 ? (
                 <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 p-4 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Direct Image URL</span>
-                    <span className="text-[11px] text-zinc-400">CDN Hosted · Permanent</span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Short Image URL</span>
+                    <span className="text-[11px] text-zinc-400">Clean &amp; Compact · MongoDB</span>
                   </div>
 
-                  {/* Direct Image URL copy box */}
+                  {/* Short Image URL copy box */}
                   <div className="rounded-lg border border-zinc-700 bg-zinc-900/90 p-3 flex items-center gap-2">
-                    <a href={result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open direct image">{result.urls[0]}</a>
-                    <button onClick={() => copySingle(result.urls[0], 0)} aria-label="Copy direct image URL" className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${copiedIdx === 0 ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === 0 ? "Copied!" : "Copy URL"}</button>
+                    <a href={result.shortUrl || result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open shortened image">{result.shortUrl || result.urls[0]}</a>
+                    <button onClick={copyShort} aria-label="Copy short image URL" className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${copiedShort ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedShort ? "Copied!" : "Copy URL"}</button>
                   </div>
 
                   {/* Direct Action buttons */}
                   <div className="flex gap-2">
-                    <a href={result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25">Open Image ↗</a>
+                    <a href={result.shortUrl || result.urls[0]} target="_blank" rel="noopener noreferrer" className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white hover:bg-indigo-500 transition shadow-lg shadow-indigo-500/25">Open Link ↗</a>
                     <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition">Gallery View</a>
                     <button onClick={() => setShowQR(!showQR)} aria-label="Show QR code" className="rounded-lg border border-zinc-700 px-3 py-2.5 text-sm hover:bg-zinc-800 text-zinc-300" title="QR Code">
                       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.5A2.25 2.25 0 0 1 6 2.25h3A2.25 2.25 0 0 1 11.25 4.5v3A2.25 2.25 0 0 1 9 9.75H6A2.25 2.25 0 0 1 3.75 7.5v-3ZM3.75 16.5A2.25 2.25 0 0 1 6 14.25h3A2.25 2.25 0 0 1 11.25 16.5v3A2.25 2.25 0 0 1 9 21.75H6A2.25 2.25 0 0 1 3.75 19.5v-3ZM12.75 4.5A2.25 2.25 0 0 1 15 2.25h3A2.25 2.25 0 0 1 20.25 4.5v3A2.25 2.25 0 0 1 18 9.75h-3A2.25 2.25 0 0 1 12.75 7.5v-3ZM15 14.25h3.75M15 18h3.75M18 14.25v3.75" /></svg>
+                    </button>
+                  </div>
+
+                  {/* Raw CDN URL reference */}
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400 bg-zinc-950/60 rounded-md px-2.5 py-1.5 border border-zinc-800/80">
+                    <span className="truncate max-w-[280px] text-zinc-500 font-mono">CDN: {result.urls[0]}</span>
+                    <button onClick={() => copySingle(result.urls[0], 0)} className="text-indigo-400 hover:text-indigo-300 ml-2 shrink-0 font-medium">
+                      {copiedIdx === 0 ? "Copied!" : "Copy CDN"}
                     </button>
                   </div>
 
@@ -537,16 +620,16 @@ export default function Home() {
                   {showQR && (
                     <div className="flex flex-col items-center gap-2 p-3 bg-white rounded-lg mt-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.urls[0])}`} alt="QR for image" className="w-44 h-44" loading="lazy" />
-                      <span className="text-xs text-zinc-600">Scan to open image on phone</span>
+                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(result.shortUrl || result.urls[0])}`} alt="QR for image" className="w-44 h-44" loading="lazy" />
+                      <span className="text-xs text-zinc-600">Scan to open short link on phone</span>
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 via-purple-500/10 to-pink-500/10 p-4 flex flex-col gap-3">
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Gallery Link</span>
-                    <span className="text-xs text-zinc-400">Single URL · Opens all {result.count} images</span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-bold px-2.5 py-1 tracking-widest uppercase">Short Gallery Link</span>
+                    <span className="text-xs text-zinc-400">Single short URL · Opens all {result.count} images</span>
                   </div>
                   <div className="rounded-lg border border-zinc-700 bg-zinc-900/80 p-3 flex items-center gap-2">
                     <a href={result.galleryUrl} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate">{result.galleryUrl}</a>
@@ -573,20 +656,23 @@ export default function Home() {
               {result.count > 1 && (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between px-1">
-                    <span className="text-xs font-medium text-zinc-400">Individual URLs ({result.urls.length})</span>
+                    <span className="text-xs font-medium text-zinc-400">Individual Short Links ({result.urls.length})</span>
                     <button onClick={copyAll} className={`text-xs font-medium transition ${copiedAll ? "text-emerald-400" : "text-indigo-400 hover:text-indigo-300"}`}>{copiedAll ? "Copied all!" : "Copy all"}</button>
                   </div>
                   <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-                    {result.urls.map((url, idx) => (
-                      <div key={idx} className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-2.5 flex items-center gap-2">
-                        <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[10px] font-bold text-zinc-300">#{idx + 1}</span>
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open original image">{url}</a>
-                        <button onClick={() => copySingle(url, idx)} aria-label={`Copy URL ${idx + 1}`} className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${copiedIdx === idx ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === idx ? "Copied!" : "Copy"}</button>
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-md bg-zinc-800 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 transition" title="Open original">
-                          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-                        </a>
-                      </div>
-                    ))}
+                    {result.urls.map((url, idx) => {
+                      const itemShort = result.data?.[idx]?.shortUrl || (result.shortIds?.[idx] ? `${window.location.origin}/s/${result.shortIds[idx]}` : url);
+                      return (
+                        <div key={idx} className="rounded-lg border border-zinc-800 bg-zinc-800/40 p-2.5 flex items-center gap-2">
+                          <span className="shrink-0 w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[10px] font-bold text-zinc-300">#{idx + 1}</span>
+                          <a href={itemShort} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs text-indigo-400 hover:underline truncate" title="Open shortened link">{itemShort}</a>
+                          <button onClick={() => copySingle(itemShort, idx)} aria-label={`Copy short link ${idx + 1}`} className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium transition ${copiedIdx === idx ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>{copiedIdx === idx ? "Copied!" : "Copy"}</button>
+                          <a href={itemShort} target="_blank" rel="noopener noreferrer" className="shrink-0 rounded-md bg-zinc-800 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 transition" title="Open link">
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+                          </a>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="flex gap-2 overflow-x-auto py-1">
                     {result.urls.map((u, i) => (

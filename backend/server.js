@@ -14,6 +14,7 @@ import uploadRoute from './routes/uploadRoute.js';
 import galleryRoute from './routes/galleryRoute.js';
 import signRoute from './routes/signRoute.js';
 import cronRoute from './routes/cronRoute.js';
+import shortRoute from './routes/shortRoute.js';
 
 // Load .env for local dev only
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -120,6 +121,7 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1); // Vercel sets X-Forwarded-For
 
 // ─── Routes ───
+app.use(shortRoute); // /s/:id, /g/:id, /api/v1/shorten, /api/v1/s/:id
 app.use('/api/v1', uploadLimiter, uploadRoute);
 app.use('/api/v1', galleryRoute); // GET /api/v1/gallery/:id – no uploadLimiter
 app.use('/api/v1', signRoute); // GET /api/v1/sign – signed direct upload params

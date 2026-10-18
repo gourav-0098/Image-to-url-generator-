@@ -15,31 +15,18 @@ function tryDecodeToken(token) {
   return null;
 }
 
-export default async function ShortRedirect({ params }) {
+export default async function GalleryShortRedirect({ params }) {
   const { id } = await params;
   if (!id) {
     redirect('/');
   }
 
-  // 1. Direct decode if token
+  // 1. Direct decode if legacy base64 token
   const fromToken = tryDecodeToken(id);
   if (fromToken && fromToken.length > 0) {
     redirect(`/gallery?g=${encodeURIComponent(id)}`);
   }
 
-  // 2. Query backend API if Redis/server ID
-  try {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://image-to-url-generator.vercel.app";
-    const res = await fetch(`${apiBase}/api/v1/gallery/${encodeURIComponent(id)}`, { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.urls) && data.urls.length > 0) {
-        const token = Buffer.from(JSON.stringify(data.urls)).toString('base64url');
-        redirect(`/gallery?g=${token}`);
-      }
-    }
-  } catch {}
-
-  // 3. Fallback to /gallery/${id}
-  redirect(`/gallery/${encodeURIComponent(id)}`);
+  // 2. Redirect to gallery page with the short ID
+  redirect(`/gallery?id=${encodeURIComponent(id)}`);
 }
