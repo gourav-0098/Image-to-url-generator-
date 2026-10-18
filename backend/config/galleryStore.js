@@ -13,3 +13,8 @@ export async function getGallery(id) {
   }
   return null;
 }
+
+export function _memSize() {
+  return 0;
+}
+

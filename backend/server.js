@@ -68,7 +68,7 @@ const corsOptions = {
     return cb(null, false);
   },
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   maxAge: 600,
   credentials: true,
 };
@@ -90,16 +90,17 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests. Slow down.' },
-  skip: (req) => req.path.startsWith('/api/v1/gallery') && req.method === 'GET',
+  skip: (req) => req.method === 'OPTIONS' || (req.path.startsWith('/api/v1/gallery') && req.method === 'GET'),
 });
 app.use(globalLimiter);
 
 // ─── 4. Upload Rate Limiter ───
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
   message: {
     success: false,
     error: 'Too many upload requests. Please try again after 15 minutes.',

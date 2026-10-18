@@ -12,30 +12,44 @@ function signParams(params, secret) {
 export async function GET() {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
-  if (!cloudName || !apiSecret) {
-    return NextResponse.json({ success: false, error: 'Cloudinary not configured' }, { status: 500 });
+  if (cloudName && apiSecret) {
+    const timestamp = Math.round(Date.now() / 1000);
+    const folder = 'image-to-url';
+    const signature = signParams({ timestamp, folder }, apiSecret);
+    return NextResponse.json({
+      success: true,
+      data: {
+        cloudName,
+        apiKey: process.env.CLOUDINARY_API_KEY,
+        timestamp,
+        signature,
+        folder,
+        uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+        ttl: 300,
+      },
+    }, {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
   }
-  const timestamp = Math.round(Date.now() / 1000);
-  const folder = 'image-to-url';
-  const signature = signParams({ timestamp, folder }, apiSecret);
-  return NextResponse.json({
-    success: true,
-    data: {
-      cloudName,
-      apiKey: process.env.CLOUDINARY_API_KEY,
-      timestamp,
-      signature,
-      folder,
-      uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-      ttl: 300,
-    },
-  }, {
-    headers: {
-      'Cache-Control': 'no-store',
-      'Content-Security-Policy': "default-src 'self'; img-src 'self' data: *.cloudinary.com res.cloudinary.com; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' api.cloudinary.com *.cloudinary.com; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+
+  // Fallback: proxy to backend API if frontend doesn't have direct Cloudinary credentials
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://image-to-url-generator.vercel.app';
+  try {
+    const res = await fetch(`${apiBase}/api/v1/sign`, { cache: 'no-store' });
+    const data = await res.json();
+    return NextResponse.json(data, {
+      status: res.status,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: 'Sign service temporarily unavailable' }, { status: 503 });
+  }
 }
 
 
